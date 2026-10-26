@@ -28,3 +28,5 @@ uv build
 ## Release
 
 Update the version and changelog, then run the full checks locally or through **SDK tests** on the release commit. Only after they pass, tag that commit `v<version>`. The automatic packaging workflow attaches adapter wheel/source archives to a GitHub release; it does not verify runtime behavior or include the core SDKs. Releases do not upload to PyPI.
+
+The release job always builds from the version tag. A push to `main` also checks for an unpublished tag matching the package version, so an initial branch/tag push can complete the release. Existing releases are left unchanged.
