@@ -1,0 +1,30 @@
+[project]
+name = "station"
+version = "0"
+requires-python = ">=3.12"
+dependencies = [
+  "xpisode==0.1.0",
+  "xpisode-format==0.1.0",
+  "xpisode-device==0.1.0",
+  "xpisode-env==0.1.0",
+  "xpisode-realsense==0.1.0",
+]
+
+[tool.uv]
+package = false
+
+[tool.xpisode]
+data = "data"
+
+[[tool.uv.index]]
+name = "wheels"
+url = "./wheels"
+format = "flat"
+explicit = true
+
+[tool.uv.sources]
+xpisode = { index = "wheels" }
+xpisode-format = { index = "wheels" }
+xpisode-device = { index = "wheels" }
+xpisode-env = { index = "wheels" }
+xpisode-realsense = { index = "wheels" }

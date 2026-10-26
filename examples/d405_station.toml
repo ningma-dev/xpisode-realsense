@@ -1,0 +1,12 @@
+# A station that only records one D405 (format scenario S5: sensors only). From the station
+# project, with this file in its stations/:
+#
+#     uv run xpisode run stations/d405/d405_station.toml
+
+station = "d405"
+required_streams = ["/wrist_camera/frame"]
+
+[[devices]]
+name = "wrist_camera"
+command = ["xpisode-device", "run", "--station", "{station}", "--name", "{name}",
+           "--factory", "xpisode_realsense:D405", "--config", '{"serial": "YOUR_CAMERA_SERIAL", "width": 640, "height": 480, "fps": 30, "frame_fields": ["color", "depth_hardware"]}']
