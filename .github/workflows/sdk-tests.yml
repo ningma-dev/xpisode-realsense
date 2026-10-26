@@ -1,0 +1,38 @@
+name: SDK tests
+
+# Run manually on a reviewed ref. Pull requests never receive SDK credentials.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          python-version: ${{ matrix.python }}
+          # Do not put private SDK source or builds in a public repository cache.
+          enable-cache: false
+      - name: Install dependencies with private SDK access
+        env:
+          GH_TOKEN: ${{ secrets.XPISODE_SDK_TOKEN }}
+          GIT_CONFIG_COUNT: "1"
+          GIT_CONFIG_KEY_0: credential.https://github.com.helper
+          GIT_CONFIG_VALUE_0: "!gh auth git-credential"
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::Set XPISODE_SDK_TOKEN with read access to ningma-dev/xpisode before running SDK tests."
+            exit 1
+          fi
+          uv sync --locked
+      - run: scripts/check.sh

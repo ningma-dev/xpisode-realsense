@@ -12,7 +12,9 @@ D405 is the supported model. Other RealSense models are rejected during opening.
 
 ## Install and record
 
-Follow [Install a station from source](docs/installation.md) to build the core and adapter and create a station project. List connected camera serial numbers from that project:
+Running a station requires access to the private xpisode core repository or core wheel files supplied by the maintainer. The adapter is public; the core and its SDKs are not on PyPI.
+
+Follow [Install a station](docs/installation.md) to build the core and adapter and create a station project. List connected camera serial numbers from that project:
 
 ```bash
 uv run python -c 'import pyrealsense2 as rs; print("\n".join(d.get_info(rs.camera_info.serial_number) for d in rs.context().query_devices()))'
@@ -87,6 +89,8 @@ Every image declares its intrinsics, optical frame and provenance. Color uses lo
 An inference plugin is installed separately and selected with `depth_backend.factory`. This package contains no neural model or PyTorch dependency; ordinary hardware RGB-D needs neither. See the [backend interface](docs/depth-backends.md) for the plugin contract and configuration. The `depth_ffs` field requires an installed plugin; enabling the field alone does not download a model.
 
 ## Develop and test
+
+The locked development environment fetches the xpisode SDKs from the private core repository. Authenticate Git with an account that has access before syncing.
 
 ```bash
 uv sync --python 3.12

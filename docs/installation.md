@@ -1,12 +1,23 @@
-# Install a station from source
+# Install a station
 
-Use Linux x86_64, Python 3.12, Git, uv, a C/C++ compiler, libclang, and Rust with Cargo. The xpisode SDKs and I2RT SDK are distributed from GitHub; a bare `pip install xpisode` or `pip install i2rt` is not the installation route for this release.
+The adapter is public. The xpisode core and its SDKs are currently private and are not available on PyPI. To run a station, obtain either access to `ningma-dev/xpisode` or compatible core wheel files from the maintainer. Cloning this adapter alone does not provide the core.
 
-Build the core once. This also builds the web interface that the station needs:
+Use Linux x86_64, Python 3.12, Git and uv.
+
+Create a workspace for the packages and your station:
 
 ```bash
-mkdir xpisode-workspace
+mkdir -p xpisode-workspace/wheels
 cd xpisode-workspace
+```
+
+## Obtain the core packages
+
+**With supplied wheels:** put the `0.1.0` wheels for `xpisode`, `xpisode-device`, `xpisode-format` and `xpisode-env` into `wheels/`, then continue to **Build the adapter and create a station** below. The `xpisode` wheel must include the built web interface and match your Python version and platform. This route needs no core repository login.
+
+**With source access:** authenticate Git for your GitHub account before cloning the private repository. You also need a C/C++ compiler, libclang and Rust with Cargo. Build the core and its web interface:
+
+```bash
 git clone https://github.com/ningma-dev/xpisode.git
 cd xpisode
 uv sync --locked
@@ -17,6 +28,8 @@ cd ..
 uv build --all-packages --out-dir ../wheels
 cd ..
 ```
+
+## Build the adapter and create a station
 
 Build the adapter, then create a station using its supplied project template:
 
@@ -41,4 +54,4 @@ Replace `YOUR_CAMERA_SERIAL` in `stations/d405/d405_station.toml` with your came
 
 Recordings go into `my-station/data/<station>/episodes/`. To inspect them, run `uv run xpisode serve` in this project and open the URL printed by the command. Stop the server with Ctrl+C when finished.
 
-For annotation, review and dataset export, follow the [xpisode collection tutorial](https://github.com/ningma-dev/xpisode/blob/main/docs/tutorials/collection.md).
+For annotation, review and dataset export, core repository collaborators can follow the [xpisode collection tutorial](https://github.com/ningma-dev/xpisode/blob/main/docs/tutorials/collection.md).
