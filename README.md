@@ -26,18 +26,13 @@ Replace `YOUR_CAMERA_SERIAL` in `stations/d405/d405_station.toml` with the chose
 uv run xpisode run stations/d405/d405_station.toml
 ```
 
-In another terminal in the same project:
+In another terminal in the same project, start the panel:
 
 ```bash
-uv run xpisode status --station d405
-uv run xpisode record start --station d405 --task demo
-# Collect the sequence, then:
-uv run xpisode record stop --station d405
-uv run xpisode shutdown --station d405
-uv run xpisode verify data/d405/episodes
+uv run xpisode serve
 ```
 
-To review recordings, run `uv run xpisode serve`, open **Episodes**, and select the image or depth fields to display. The viewer uses recorded field metadata; the user chooses which depth produces a point cloud.
+Start and stop a recording on its Collection page; Ctrl+C in the station's terminal shuts the station down. To review recordings, open **Episodes**: each Episode's page shows its check (fields, timing, missing frames). Select the image or depth fields to display. The viewer uses recorded field metadata; the user chooses which depth produces a point cloud.
 
 ## Select fields
 
