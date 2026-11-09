@@ -66,18 +66,22 @@ Each optional field can be enabled independently. Without `frame_fields`, the de
 | `depth_backend` | hardware | Optional inference plugin and its options |
 | `legacy_topics` | `false` | Also publish independent image topics for compatibility |
 | `streams` | `["color", "depth"]` | Independent outputs when compatibility topics are enabled |
+| `exposure_us` | auto | Fixed exposure in microseconds; turns auto exposure off |
+| `gain` | auto | Fixed gain, with `exposure_us` |
 
 The station example uses 640×480 at 30 Hz. Choose a resolution/rate combination supported by the camera and USB link. With several cameras, add a device entry for each serial. Opening a camera in another process at the same time can fail with a USB or `VIDIOC_S_FMT` error; stop the previous owner before retrying.
 
 ## Timing and data representation
 
-Each observation comes from a single SDK frameset. Accepted inputs have exposure timestamps within 5 ms, increasing counters, and matching left/right infrared counters. Color and depth counters may have independent origins. The observation timestamp is the middle of the color exposure, expressed on the host monotonic clock; its sequence is the color counter.
+Each observation comes from a single SDK frameset: librealsense pairs the streams, and the adapter checks only that every requested stream is there, each frame is new, and the left/right infrared counters match. Color and depth counters may have independent origins. Every stream is stamped with librealsense's global frame time, expressed on the host monotonic clock; the observation's timestamp and sequence are the color frame's. Frame metadata exposure is not used for timing: a D405 color frame has been seen to report a stale exposure under auto exposure. A frameset that fails a check is dropped and counted by reason; one second without an observation faults the camera, and the error says where the framesets went.
 
 This aligns fields within one camera. It does not provide hardware-trigger synchronization between different cameras. A bounded pending frame prevents an inference backlog; dropped frames remain visible in sequence gaps. A backend failure faults the device instead of silently substituting another depth source.
 
 Both depth fields are aligned metric depth, so `depth_hardware` is not a bit-exact copy of the original uint16 sensor grid. Enable the independent `depth` topic explicitly when that representation is required. Compatibility topics duplicate publication and storage; they are off by default.
 
-Every image declares its intrinsics, optical frame and provenance. Color uses lossless FFV1; aligned depth and infrared use zstd. Source counters, exposure times, latency and discard diagnostics are included in `frame`.
+Every image declares its intrinsics, optical frame and provenance. Color uses lossless FFV1; aligned depth and infrared use zstd. Source counters, frame times, latency and discard diagnostics are included in `frame`. The exposure, gain and auto-exposure state read back at open are in the device facts (`exposure`).
+
+For recording, fix the exposure: the image brightness stays constant, and auto exposure in a dark scene cannot lengthen the exposure past the frame interval, which lowers the delivered rate (33 ms halves 30 fps).
 
 ## Optional inferred depth
 

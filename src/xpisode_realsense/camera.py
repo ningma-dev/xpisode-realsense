@@ -9,8 +9,10 @@ is a RealSense.
 
 The configuration chooses the streams, from the model's ``offers``, all at one width, height,
 and frame rate. Each is numbered by the camera's own frame counter, so a frame the camera or
-the USB bus dropped shows as missing in the Episode, and each frame is stamped at the middle
-of its exposure, on the host's monotonic clock.
+the USB bus dropped shows as missing in the Episode, and each frame is stamped with
+librealsense's global time for it, on the host's monotonic clock: one time base for every
+stream of a frame set. Exposure and gain stay automatic unless the configuration fixes them;
+what they were at open is recorded.
 """
 
 from __future__ import annotations
@@ -69,17 +71,30 @@ WARMUP_FRAMES = 5
 FIRST_FRAME_TIMEOUT_MS = 5000
 
 
-def mid_exposure_ns(
-    global_ms: float, frame_timestamp_us: int, sensor_timestamp_us: int, wall_minus_clock_ns: int
-) -> int:
-    """The middle of a frame's exposure on the host clock.
+OFFSET_SAMPLES = 3
+"""Readings of the two clocks per frame set; the closest pair counts."""
 
-    librealsense's global time is the camera clock mapped to the host's wall clock, at the
-    frame timestamp; the frame metadata's sensor timestamp is the middle of the exposure,
-    on the camera clock. ``wall_minus_clock_ns`` turns wall time into host clock time.
-    """
-    exposure_half_ns = (frame_timestamp_us - sensor_timestamp_us) * 1000
-    return round(global_ms * 1e6) - exposure_half_ns - wall_minus_clock_ns
+
+def wall_minus_clock_ns(clock: Clock, samples: int = OFFSET_SAMPLES) -> int:
+    """The host's wall clock minus ``clock``, from the reading whose two clock reads were
+    closest together: a thread switch between them, up to Python's 5 ms switch interval, would
+    otherwise be in the difference."""
+    best: tuple[int, int] | None = None
+    for _ in range(samples):
+        before = clock.now_ns()
+        wall = time.time_ns()
+        after = clock.now_ns()
+        if best is None or after - before < best[0]:
+            best = (after - before, wall - (before + after) // 2)
+    assert best is not None
+    return best[1]
+
+
+def host_ns(global_ms: float, wall_minus_clock_ns: int) -> int:
+    """A frame's librealsense global time, the camera clock mapped to the host's wall clock,
+    on the host clock. The frame metadata's exposure is not used: a D405's color frames have
+    been seen to report a stale exposure after auto exposure changed it."""
+    return round(global_ms * 1e6) - wall_minus_clock_ns
 
 
 PLUMB_BOB_TOLERANCE_PX = 0.05
@@ -230,7 +245,15 @@ class RealSense(Device):
         depth_backend: dict[str, Any] | None = None,
         frame_fields: Sequence[str] | None = None,
         legacy_topics: bool = False,
+        exposure_us: float | None = None,
+        gain: float | None = None,
     ) -> None:
+        if exposure_us is not None and not exposure_us > 0:
+            raise ValueError("exposure_us must be positive")
+        if gain is not None and exposure_us is None:
+            raise ValueError("gain needs exposure_us: auto exposure sets the gain itself")
+        self.exposure_us, self.gain = exposure_us, gain
+        self._exposure: dict[str, JsonValue] = {}
         if not streams or any(name not in self.offers for name in streams):
             raise ValueError(f"streams {list(streams)}: choose from {list(self.offers)}")
         default_depth = (
@@ -299,6 +322,7 @@ class RealSense(Device):
         profile = pipeline.start(config, self._on_frames)
         try:
             self._check_model(profile.get_device())
+            self._exposure = self._set_exposure(profile.get_device())
             if not self._warm.wait(FIRST_FRAME_TIMEOUT_MS / 1000):
                 raise RuntimeError(f"no frames within {FIRST_FRAME_TIMEOUT_MS} ms")
             for frame in self._first:
@@ -321,7 +345,9 @@ class RealSense(Device):
                     if self._failure is not None:
                         raise self._failure
                     if time.monotonic() > deadline:
-                        raise TimeoutError("No synchronized frame within 30 seconds")
+                        raise TimeoutError(
+                            "No synchronized frame within 30 seconds; " + self._frame.diagnosis()
+                        )
                 self._frame.check()
         except BaseException:
             if self._frame is not None:
@@ -349,7 +375,9 @@ class RealSense(Device):
                 return
             if self._info is None:  # open is still checking
                 return
-            readings = {name: self._reading(f) for name, f in self._frames(frames)}
+            assert self._clock is not None
+            offset = wall_minus_clock_ns(self._clock)
+            readings = {name: self._reading(f, offset) for name, f in self._frames(frames)}
             if self.legacy_topics:
                 for name, reading in readings.items():
                     assert reading.sequence is not None
@@ -374,6 +402,29 @@ class RealSense(Device):
                 f"{type(self).__name__} drives product id {self.product_id}"
             )
 
+    def _set_exposure(self, device: Any) -> dict[str, JsonValue]:
+        """Fix exposure and gain where the configuration asks; then what each sensor that
+        exposes reads back, for the record."""
+        option = rs.option
+        facts: dict[str, JsonValue] = {}
+        for sensor in device.query_sensors():
+            if not sensor.supports(option.exposure):
+                continue
+            if self.exposure_us is not None:
+                sensor.set_option(option.enable_auto_exposure, 0)
+                sensor.set_option(option.exposure, float(self.exposure_us))
+            if self.gain is not None:
+                sensor.set_option(option.gain, float(self.gain))
+            fact: dict[str, JsonValue] = {"exposure_us": float(sensor.get_option(option.exposure))}
+            if sensor.supports(option.enable_auto_exposure):
+                fact["auto_exposure"] = bool(sensor.get_option(option.enable_auto_exposure))
+            if sensor.supports(option.gain):
+                fact["gain"] = float(sensor.get_option(option.gain))
+            facts[str(sensor.get_info(rs.camera_info.name))] = fact
+        if self.exposure_us is not None and not facts:
+            raise RuntimeError("no sensor of this camera takes an exposure")
+        return facts
+
     def identity(self, device: Any) -> dict[str, JsonValue]:
         """What the model records of the camera beyond what every model has."""
         return {}
@@ -393,13 +444,6 @@ class RealSense(Device):
                 f"{frame.get_profile().stream_name()} frames are in {domain}, "
                 "not global time: the host cannot place them on its clock"
             )
-        metadata = rs.frame_metadata_value
-        for key in (metadata.frame_timestamp, metadata.sensor_timestamp):
-            if not frame.supports_frame_metadata(key):
-                raise RuntimeError(
-                    f"frames lack the {key} metadata needed to find the exposure "
-                    "(librealsense backend or kernel without frame metadata)"
-                )
 
     def _describe(self, profile: Any) -> DeviceInfo:
         device = profile.get_device()
@@ -424,6 +468,7 @@ class RealSense(Device):
             "width": self.width,
             "height": self.height,
             "fps": self.fps,
+            "exposure": self._exposure,
             **self.identity(device),
         }
         streams = {
@@ -434,7 +479,7 @@ class RealSense(Device):
                     fields=(self._field(name, depth_scale),),
                     counter=Counter.DEVICE,
                     nominal_hz=float(self.fps),
-                    description="stamped at the middle of the exposure",
+                    description="stamped with librealsense's global frame time",
                     camera=camera_of(profiles[name].as_video_stream_profile().get_intrinsics()),
                 ),
                 poll_hz=self.fps * POLLS_PER_FRAME,
@@ -482,15 +527,8 @@ class RealSense(Device):
             self._frame.check()
         return self._newest.take(stream)
 
-    def _reading(self, frame: Any) -> Reading:
-        assert self._clock is not None
-        wall_minus_clock_ns = time.time_ns() - self._clock.now_ns()
-        time_ns = mid_exposure_ns(
-            frame.get_timestamp(),
-            frame.get_frame_metadata(rs.frame_metadata_value.frame_timestamp),
-            frame.get_frame_metadata(rs.frame_metadata_value.sensor_timestamp),
-            wall_minus_clock_ns,
-        )
+    def _reading(self, frame: Any, wall_minus_clock_ns: int) -> Reading:
+        time_ns = host_ns(frame.get_timestamp(), wall_minus_clock_ns)
         # A copy: librealsense reuses the frame's memory once the frame is released.
         value = np.asanyarray(frame.get_data()).copy()
         return Reading(time_ns, (value,), sequence=frame.get_frame_number())

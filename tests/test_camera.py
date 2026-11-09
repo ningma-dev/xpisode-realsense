@@ -50,7 +50,7 @@ def test_frames_arrive_numbered_and_stamped_by_the_camera(serial: str) -> None:
                     assert reading.sequence is not None
                     kept.append((reading.sequence, reading.time_ns))
                     age_ns = clock.now_ns() - reading.time_ns
-                    assert 0 < age_ns < 100_000_000  # exposure middle, then USB and copy
+                    assert 0 < age_ns < 100_000_000  # frame time, then USB and copy
                     values[stream] = np.asarray(reading.values[0])
             time.sleep(0.002)
     finally:

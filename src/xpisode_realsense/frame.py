@@ -2,7 +2,8 @@
 
 A backend returns metric Z plus its calibration. Output depth uses color pixel
 coordinates; infrared retains native calibration.
-Inputs come from one SDK frameset and pass an exposure-time tolerance. One bounded
+Inputs come from one SDK frameset: librealsense pairs them, and only the streams being there,
+each frame being new, and the two infrared frames' numbers are checked here. One bounded
 pending frameset prevents latency from growing when inference is slower than capture.
 """
 
@@ -12,7 +13,7 @@ import importlib
 import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
 from typing import Any, Protocol
 
 import numpy as np
@@ -119,6 +120,49 @@ class Projector:
         return out.reshape(c.height, c.width)
 
 
+DROP_REASONS = (
+    "incomplete",
+    "color_repeated",
+    "no_sequence",
+    "stream_repeated",
+    "infrared_mismatch",
+)
+"""Why a frame set librealsense offered did not become a frame: a stream missing from it; the
+color frame already seen (the syncer repeats a stream's last frame when it missed one); a
+frame without a number; another stream's frame already seen; the two infrared frames from
+different exposures."""
+STALL_S = 1.0
+"""No frame for this long faults the camera; at 30 Hz the longest normal gap is about 0.37 s."""
+
+
+@dataclass
+class Drops:
+    """What became of the frame sets librealsense offered. The published counters only move
+    when a frame is published, so a stall hides them; this is what the stall error reports.
+
+    The librealsense thread writes all but ``published`` and ``at_last_frame``, which the
+    worker writes; each field has one writer.
+    """
+
+    offered: int = 0
+    accepted: int = 0
+    last_offer: float | None = None
+    """``time.monotonic()`` of the last frame set offered."""
+    counts: dict[str, int] = field(default_factory=lambda: dict.fromkeys(DROP_REASONS, 0))
+    last_sequences: dict[str, int] = field(default_factory=dict[str, int])
+    """The newest number offered of each stream, accepted or not."""
+    published: int = 0
+    at_last_frame: dict[str, int] = field(default_factory=lambda: dict.fromkeys(DROP_REASONS, 0))
+    """``counts`` when the last frame was published."""
+
+    def drop(self, reason: str) -> None:
+        self.counts[reason] += 1
+
+    def frame_published(self) -> None:
+        self.published += 1
+        self.at_last_frame = dict(self.counts)
+
+
 class Frame:
     def __init__(
         self,
@@ -141,7 +185,7 @@ class Frame:
         self.last_counters: dict[str, int] = {}
         self.discarded = 0
         self.rejected = 0
-        self.tolerance_ns = int(config.get("tolerance_ms", 5) * 1e6)
+        self.drops = Drops()
         factory = str(config.get("factory", "hardware"))
         self.outputs = tuple(fields)
         self.backend: DepthBackend | None = None
@@ -246,7 +290,6 @@ class Frame:
                 "depth_backend": factory,
                 "frame_fields": list(self.outputs),
                 "legacy_topics": legacy_topics,
-                "frame_tolerance_ms": self.tolerance_ns / 1e6,
                 "depth_backend_config": self.backend.metadata if self.backend else {},
             },
         )
@@ -254,30 +297,42 @@ class Frame:
         self.thread.start()
 
     def offer(self, readings: Mapping[str, Reading]) -> None:
+        drops = self.drops
+        drops.offered += 1
+        drops.last_offer = time.monotonic()
+        for name, reading in readings.items():
+            if reading.sequence is not None:
+                drops.last_sequences[name] = reading.sequence
         if not all(n in readings for n in self.names):
+            drops.drop("incomplete")
             return
         sample = [readings[n] for n in self.names]
         sequence = sample[0].sequence
         if sequence is None or any(s.sequence is None for s in sample):
             self.rejected += 1
+            drops.drop("no_sequence")
             return
         if sequence <= self.last_sequence:
+            drops.drop("color_repeated")
             return
         self.last_sequence = sequence
-        if (
-            any(
-                s.sequence is None or s.sequence <= self.last_counters.get(n, -1)
-                for n, s in zip(self.names, sample, strict=True)
-            )
-            or (
-                "infrared_1" in self.names
-                and "infrared_2" in self.names
-                and readings["infrared_1"].sequence != readings["infrared_2"].sequence
-            )
-            or max(s.time_ns for s in sample) - min(s.time_ns for s in sample) > self.tolerance_ns
+        reason = ""
+        if any(
+            s.sequence is None or s.sequence <= self.last_counters.get(n, -1)
+            for n, s in zip(self.names, sample, strict=True)
         ):
+            reason = "stream_repeated"
+        elif (
+            "infrared_1" in self.names
+            and "infrared_2" in self.names
+            and readings["infrared_1"].sequence != readings["infrared_2"].sequence
+        ):
+            reason = "infrared_mismatch"
+        if reason:
             self.rejected += 1
+            drops.drop(reason)
             return
+        drops.accepted += 1
         self.last_counters = {
             n: s.sequence for n, s in zip(self.names, sample, strict=True) if s.sequence is not None
         }
@@ -336,6 +391,7 @@ class Frame:
                 reading = Reading(sample[0].time_ns, tuple(values), sequence=sample[0].sequence)
                 assert reading.sequence is not None
                 self.publish("frame", reading.sequence, lambda reading=reading: reading)
+                self.drops.frame_published()
                 self.last_result = time.monotonic()
                 self.ready.set()
         except Exception as error:  # noqa: BLE001 - forwarded to DeviceHost.read
@@ -345,8 +401,29 @@ class Frame:
     def check(self) -> None:
         if self.failure is not None:
             raise self.failure
-        if time.monotonic() - self.last_result > 15:
-            raise TimeoutError("frame observation stalled; no source fallback")
+        if time.monotonic() - self.last_result > STALL_S:
+            raise TimeoutError(f"frame observation stalled; no source fallback; {self.diagnosis()}")
+
+    def diagnosis(self) -> str:
+        """Where the frame sets went since the last frame, for an error message."""
+        d = self.drops
+        now = time.monotonic()
+        offered = (
+            "librealsense offered no frame set"
+            if d.last_offer is None
+            else f"librealsense offered {d.offered} frame sets, "
+            f"the last {now - d.last_offer:.2f} s ago"
+        )
+        since = {r: d.counts[r] - d.at_last_frame.get(r, 0) for r in DROP_REASONS}
+        dropped = ", ".join(f"{r} {n}" for r, n in since.items() if n) or "none"
+        last = ", ".join(f"{n} {d.last_sequences.get(n, 'none')}" for n in self.names)
+        accepted = ", ".join(f"{n} {self.last_counters.get(n, 'none')}" for n in self.names)
+        return (
+            f"{now - self.last_result:.1f} s since the last frame; {offered}; "
+            f"accepted {d.accepted}, published {d.published}; "
+            f"dropped since the last frame: {dropped}; "
+            f"last offered numbers: {last}; last accepted numbers: {accepted}"
+        )
 
     def close(self) -> None:
         self.stop.set()
