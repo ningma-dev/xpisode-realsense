@@ -11,6 +11,8 @@ from typing import Any
 import numpy as np
 import pytest
 from xpisode_device import MonotonicClock, Reading
+from xpisode_format import codecs
+from xpisode_format.spec import Encoding
 
 import xpisode_realsense.camera as camera_module
 from xpisode_realsense import D405
@@ -280,7 +282,15 @@ def test_open_starts_the_clock_keeper_and_close_stops_it(monkeypatch: pytest.Mon
         assert isinstance(facts["accepted"], int)
         assert facts["accepted"] >= 8
         assert facts["broken"] is None
+        frame = info.streams["frame"].spec
+        infrared = next(f for f in frame.fields if f.name == "infrared_left")
+        assert infrared.encoding is Encoding.FFV1
+        assert infrared.shape == (HEIGHT, WIDTH)
         assert info.streams["frame"].spec.description
+        reading = frames_for(device, 0.2)[-1]
+        index = [f.name for f in frame.fields].index("infrared_left")
+        image = np.asarray(reading.values[index])
+        assert np.array_equal(codecs.decode(infrared, codecs.encode(infrared, image)), image)
     finally:
         device.close()
     device.close()  # again: nothing left to stop

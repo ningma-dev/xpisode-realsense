@@ -79,7 +79,7 @@ This aligns fields within one camera. It does not provide hardware-trigger synch
 
 Both depth fields are aligned metric depth, so `depth_hardware` is not a bit-exact copy of the original uint16 sensor grid. Enable the independent `depth` topic explicitly when that representation is required. Compatibility topics duplicate publication and storage; they are off by default.
 
-Every image declares its intrinsics, optical frame and provenance. Color uses lossless FFV1; aligned depth and infrared use zstd. Source counters, frame times, latency and discard diagnostics are included in `frame`. The exposure, gain and auto-exposure state read back at open are in the device facts (`exposure`).
+Every image declares its intrinsics, optical frame and provenance. Color and infrared use lossless FFV1 (infrared as gray); aligned depth uses zstd. Source counters, frame times, latency and discard diagnostics are included in `frame`. The exposure, gain and auto-exposure state read back at open are in the device facts (`exposure`).
 
 For recording, fix the exposure: the image brightness stays constant, and auto exposure in a dark scene cannot lengthen the exposure past the frame interval, which lowers the delivered rate (33 ms halves 30 fps).
 

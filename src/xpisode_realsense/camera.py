@@ -520,7 +520,7 @@ class RealSense(Device):
             scale=depth_scale if name == "depth" else 1.0,
             encoding=kind.encoding,
             codec_config=(
-                codecs.ffv1_config(self.height, self.width)
+                codecs.ffv1_config(self.height, self.width, len(kind.channels) or 1)
                 if kind.encoding is Encoding.FFV1
                 else None
             ),

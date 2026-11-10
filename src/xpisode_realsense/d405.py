@@ -24,7 +24,8 @@ from xpisode_format.spec import Encoding
 from xpisode_realsense.camera import Kind, RealSense, rs
 
 STREAMS: dict[str, Kind] = {
-    # Lossless, every frame alone, about half of QOI.
+    # Lossless, every frame alone, about half of QOI; the imagers in FFV1 gray, about half of
+    # zstd (71 KB instead of 150 KB per 640x480 image).
     "color": Kind(
         rs.stream.color, 0, rs.format.rgb8, "uint8", ("r", "g", "b"), "1", Encoding.FFV1, "color"
     ),
@@ -45,7 +46,7 @@ STREAMS: dict[str, Kind] = {
         "uint8",
         (),
         "1",
-        Encoding.ZSTD,
+        Encoding.FFV1,
         "the left imager, monochrome",
     ),
     "infrared_2": Kind(
@@ -55,7 +56,7 @@ STREAMS: dict[str, Kind] = {
         "uint8",
         (),
         "1",
-        Encoding.ZSTD,
+        Encoding.FFV1,
         "the right imager, monochrome",
     ),
 }
