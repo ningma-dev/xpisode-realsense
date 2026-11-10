@@ -5,7 +5,7 @@ Record RealSense D405 cameras with [xpisode](https://github.com/ningma-dev/xpiso
 ## Requirements
 
 - A RealSense D405 connected through USB 3.
-- Linux with permission to access the camera and a librealsense backend that provides global timestamps and exposure metadata.
+- Linux with permission to access the camera and a librealsense backend that provides hardware timestamps (frame metadata) and exposure metadata.
 - Python 3.10 or later for the adapter; Python 3.12 for a complete xpisode station.
 
 D405 is the supported model. Other RealSense models are rejected during opening. The driver has been exercised with librealsense 2.59.1 and D405 firmware 5.15.1.55. Install the [librealsense device permissions](https://github.com/realsenseai/librealsense/blob/master/doc/distribution_linux.md) appropriate to your system if the SDK cannot open the camera.
@@ -73,13 +73,13 @@ The station example uses 640×480 at 30 Hz. Choose a resolution/rate combination
 
 ## Timing and data representation
 
-Each observation comes from a single SDK frameset: librealsense pairs the streams, and the adapter checks only that every requested stream is there, each frame is new, and the left/right infrared counters match. Color and depth counters may have independent origins. Every stream is stamped with librealsense's global frame time, expressed on the host monotonic clock; the observation's timestamp and sequence are the color frame's. Frame metadata exposure is not used for timing: a D405 color frame has been seen to report a stale exposure under auto exposure. A frameset that fails a check is dropped and counted by reason; one second without an observation faults the camera, and the error says where the framesets went.
+Each observation comes from a single SDK frameset: librealsense pairs the streams, and the adapter checks only that every requested stream is there, each frame is new, and the left/right infrared counters match. Color and depth counters may have independent origins. Every stream is stamped with the camera's hardware clock, mapped to the host monotonic clock by xpisode's `DeviceClock` from a reading of the camera clock every second; librealsense's global time is turned off, because it maps to the host's wall clock and a wall clock step moved frame times by seconds. The mapping's facts are in the device facts (`time`); the observation's timestamp and sequence are the color frame's. Frame metadata exposure is not used for timing: a D405 color frame has been seen to report a stale exposure under auto exposure. A frameset that fails a check is dropped and counted by reason; one second without an observation faults the camera, and the error says where the framesets went.
 
 This aligns fields within one camera. It does not provide hardware-trigger synchronization between different cameras. A bounded pending frame prevents an inference backlog; dropped frames remain visible in sequence gaps. A backend failure faults the device instead of silently substituting another depth source.
 
 Both depth fields are aligned metric depth, so `depth_hardware` is not a bit-exact copy of the original uint16 sensor grid. Enable the independent `depth` topic explicitly when that representation is required. Compatibility topics duplicate publication and storage; they are off by default.
 
-Every image declares its intrinsics, optical frame and provenance. Color uses lossless FFV1; aligned depth and infrared use zstd. Source counters, frame times, latency and discard diagnostics are included in `frame`. The exposure, gain and auto-exposure state read back at open are in the device facts (`exposure`).
+Every image declares its intrinsics, optical frame and provenance. Color and infrared use lossless FFV1 (infrared as gray); aligned depth uses zstd. Source counters, frame times, latency and discard diagnostics are included in `frame`. The exposure, gain and auto-exposure state read back at open are in the device facts (`exposure`).
 
 For recording, fix the exposure: the image brightness stays constant, and auto exposure in a dark scene cannot lengthen the exposure past the frame interval, which lowers the delivered rate (33 ms halves 30 fps).
 
