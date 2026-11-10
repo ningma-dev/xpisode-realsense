@@ -2,17 +2,18 @@
 per model, such as ``d405``) says which camera it is and what it offers.
 
 Everything camera-specific stays in librealsense: the pipeline opens the device and streams
-what is asked; its global time maps the camera clock to the host's; its frame metadata says
-when each exposure happened; it says when a camera is unplugged. This module only states what
-the camera offers in the xpisode device protocol, so a station records it without knowing it
-is a RealSense.
+what is asked; its frame metadata says when each frame happened on the camera's own clock; it
+says when a camera is unplugged. This module only states what the camera offers in the
+xpisode device protocol, so a station records it without knowing it is a RealSense.
 
 The configuration chooses the streams, from the model's ``offers``, all at one width, height,
 and frame rate. Each is numbered by the camera's own frame counter, so a frame the camera or
-the USB bus dropped shows as missing in the Episode, and each frame is stamped with
-librealsense's global time for it, on the host's monotonic clock: one time base for every
-stream of a frame set. Exposure and gain stay automatic unless the configuration fixes them;
-what they were at open is recorded.
+the USB bus dropped shows as missing in the Episode, and each frame is stamped with the
+camera's hardware clock for it, mapped to the host's monotonic clock by ``DeviceClock``: one
+time base for every stream of a frame set. librealsense's global time is off: it maps the
+camera clock to the host's wall clock, and a step of the wall clock (11 s, once) stamped
+frames seconds into the future for a minute. Exposure and gain stay automatic unless the
+configuration fixes them; what they were at open is recorded.
 """
 
 from __future__ import annotations
@@ -26,7 +27,15 @@ from dataclasses import dataclass
 from typing import Any, ClassVar
 
 import numpy as np
-from xpisode_device import Clock, Device, DeviceInfo, Reading, Stream
+from xpisode_device import (
+    Clock,
+    ClockKeeper,
+    Device,
+    DeviceClock,
+    DeviceInfo,
+    Reading,
+    Stream,
+)
 from xpisode_format import codecs
 from xpisode_format.model import JsonValue
 from xpisode_format.spec import (
@@ -71,30 +80,17 @@ WARMUP_FRAMES = 5
 FIRST_FRAME_TIMEOUT_MS = 5000
 
 
-OFFSET_SAMPLES = 3
-"""Readings of the two clocks per frame set; the closest pair counts."""
+TICK_NS = 1000
+"""The camera clock counts microseconds; librealsense gives them as milliseconds."""
+COUNTER_WRAP = 2**32
+"""The camera clock's counter is 32 bits wide: it wraps every 71.6 minutes."""
 
 
-def wall_minus_clock_ns(clock: Clock, samples: int = OFFSET_SAMPLES) -> int:
-    """The host's wall clock minus ``clock``, from the reading whose two clock reads were
-    closest together: a thread switch between them, up to Python's 5 ms switch interval, would
-    otherwise be in the difference."""
-    best: tuple[int, int] | None = None
-    for _ in range(samples):
-        before = clock.now_ns()
-        wall = time.time_ns()
-        after = clock.now_ns()
-        if best is None or after - before < best[0]:
-            best = (after - before, wall - (before + after) // 2)
-    assert best is not None
-    return best[1]
-
-
-def host_ns(global_ms: float, wall_minus_clock_ns: int) -> int:
-    """A frame's librealsense global time, the camera clock mapped to the host's wall clock,
-    on the host clock. The frame metadata's exposure is not used: a D405's color frames have
-    been seen to report a stale exposure after auto exposure changed it."""
-    return round(global_ms * 1e6) - wall_minus_clock_ns
+def ticks(ms: float) -> int:
+    """A camera clock time in milliseconds, as librealsense gives it, in microseconds. The
+    frame metadata's exposure is not used: a D405's color frames have been seen to report a
+    stale exposure after auto exposure changed it."""
+    return round(ms * 1000)
 
 
 PLUMB_BOB_TOLERANCE_PX = 0.05
@@ -305,6 +301,10 @@ class RealSense(Device):
         self._failure: Exception | None = None
         self._device: Any = None
         self._removal = ""
+        self._time: DeviceClock | None = None
+        self._keeper: ClockKeeper | None = None
+        self._timing = threading.Event()
+        """Set once global time is off: frames before it may still be in global time."""
 
     def open(self, clock: Clock) -> None:
         config = rs.config()
@@ -321,6 +321,7 @@ class RealSense(Device):
         # color and depth from three D405s.
         profile = pipeline.start(config, self._on_frames)
         try:
+            self._keep_time(profile.get_device(), clock)
             self._check_model(profile.get_device())
             self._exposure = self._set_exposure(profile.get_device())
             if not self._warm.wait(FIRST_FRAME_TIMEOUT_MS / 1000):
@@ -352,6 +353,8 @@ class RealSense(Device):
         except BaseException:
             if self._frame is not None:
                 self._frame.close()
+            if self._keeper is not None:
+                self._keeper.stop()
             pipeline.stop()
             raise
         self._pipeline = pipeline
@@ -363,9 +366,23 @@ class RealSense(Device):
         self._context.set_devices_changed_callback(self._devices_changed)
         self._removal = f"librealsense reports camera {serial} removed"
 
+    def _keep_time(self, device: Any, clock: Clock) -> None:
+        """Turn librealsense's global time off on every sensor, so frames carry the camera's
+        hardware clock, and map that clock to ``clock`` from readings of it every second."""
+        for sensor in device.query_sensors():
+            if sensor.supports(rs.option.global_time_enabled):
+                sensor.set_option(rs.option.global_time_enabled, 0)
+        self._time = DeviceClock(clock, unit_ns=TICK_NS, wrap_ticks=COUNTER_WRAP)
+        self._keeper = ClockKeeper(self._time, lambda: device.get_device_time_ms() * 1000)
+        self._keeper.start()
+        self._timing.set()
+
     def _on_frames(self, frame: Any) -> None:
         """librealsense's callback, on its own thread: each frameset as it arrives."""
         try:
+            if self._clock is None or not self._timing.is_set():
+                return
+            arrival = self._clock.now_ns()
             frames = frame.as_frameset()
             if not self._warm.is_set():
                 self._seen += 1
@@ -375,9 +392,7 @@ class RealSense(Device):
                 return
             if self._info is None:  # open is still checking
                 return
-            assert self._clock is not None
-            offset = wall_minus_clock_ns(self._clock)
-            readings = {name: self._reading(f, offset) for name, f in self._frames(frames)}
+            readings = {name: self._reading(f, arrival) for name, f in self._frames(frames)}
             if self.legacy_topics:
                 for name, reading in readings.items():
                     assert reading.sequence is not None
@@ -439,10 +454,10 @@ class RealSense(Device):
 
     def _check_timing(self, frame: Any) -> None:
         domain = frame.get_frame_timestamp_domain()
-        if domain != rs.timestamp_domain.global_time:
+        if domain != rs.timestamp_domain.hardware_clock:
             raise RuntimeError(
                 f"{frame.get_profile().stream_name()} frames are in {domain}, "
-                "not global time: the host cannot place them on its clock"
+                "not the camera's hardware clock: the host cannot place them on its clock"
             )
 
     def _describe(self, profile: Any) -> DeviceInfo:
@@ -469,6 +484,7 @@ class RealSense(Device):
             "height": self.height,
             "fps": self.fps,
             "exposure": self._exposure,
+            "time": self._time.facts() if self._time is not None else None,
             **self.identity(device),
         }
         streams = {
@@ -479,7 +495,7 @@ class RealSense(Device):
                     fields=(self._field(name, depth_scale),),
                     counter=Counter.DEVICE,
                     nominal_hz=float(self.fps),
-                    description="stamped with librealsense's global frame time",
+                    description="stamped with the camera's clock, mapped to the host's",
                     camera=camera_of(profiles[name].as_video_stream_profile().get_intrinsics()),
                 ),
                 poll_hz=self.fps * POLLS_PER_FRAME,
@@ -527,8 +543,11 @@ class RealSense(Device):
             self._frame.check()
         return self._newest.take(stream)
 
-    def _reading(self, frame: Any, wall_minus_clock_ns: int) -> Reading:
-        time_ns = host_ns(frame.get_timestamp(), wall_minus_clock_ns)
+    def _reading(self, frame: Any, arrival_ns: int) -> Reading:
+        assert self._time is not None
+        camera_time = ticks(frame.get_timestamp())
+        self._time.add_arrival(camera_time, arrival_ns)
+        time_ns = self._time.host_ns(camera_time)
         # A copy: librealsense reuses the frame's memory once the frame is released.
         value = np.asanyarray(frame.get_data()).copy()
         return Reading(time_ns, (value,), sequence=frame.get_frame_number())
@@ -540,6 +559,8 @@ class RealSense(Device):
                 rgbd.close()
         finally:
             self._context = None
+            if self._keeper is not None:
+                self._keeper.stop()
             if self._pipeline is not None:
                 self._pipeline.stop()
                 self._pipeline = None
