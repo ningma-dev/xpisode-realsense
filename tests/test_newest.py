@@ -18,6 +18,7 @@ def test_the_host_gets_each_frame_once_and_the_newest() -> None:
     assert taken is not None
     assert taken.sequence == 8
     assert newest.take("depth") is None
+    assert newest.replaced == {"depth": 1}
 
 
 def test_a_frame_offered_again_is_ignored_without_building_it() -> None:

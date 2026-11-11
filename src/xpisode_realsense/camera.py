@@ -221,12 +221,16 @@ class Newest:
         self._unread: dict[str, Reading] = {}
         self._last: dict[str, int] = {}
         self._lock = threading.Lock()
+        self.replaced: dict[str, int] = {}
+        """Frames replaced unread by a newer one, of each stream: the host read too late."""
 
     def offer(self, stream: str, number: int, make: Callable[[], Reading]) -> None:
         with self._lock:
             if number <= self._last.get(stream, -1):
                 return
             self._last[stream] = number
+            if stream in self._unread:
+                self.replaced[stream] = self.replaced.get(stream, 0) + 1
             self._unread[stream] = make()
 
     def take(self, stream: str) -> Reading | None:
@@ -330,6 +334,14 @@ class RealSense(Device):
         self.no_metadata = 0
         """Frames without ``frame_timestamp`` metadata, kept when their domain is the
         hardware clock: counted, to see on the rig whether that ever happens."""
+        self.skipped = 0
+        """Color frame numbers librealsense never handed to this process: lost on the camera,
+        the USB bus or in librealsense, or the oldest of a full queue. With the frame sets
+        dropped here (``drops``) and the frames replaced unread (``replaced``), where every
+        frame missing from an Episode went."""
+        self._last_color: int | None = None
+        self.queue_max = 0
+        """The most frame sets waiting in the queue, since the last diagnostics."""
 
     def open(self, clock: Clock) -> None:
         config = rs.config()
@@ -414,6 +426,7 @@ class RealSense(Device):
         while not self._stop_taking.is_set():
             ok, frame = queue.try_wait_for_frame(100)
             if ok:
+                self.queue_max = max(self.queue_max, queue.size() + 1)
                 self._on_frames(frame)
 
     def _end_taking(self) -> None:
@@ -438,6 +451,7 @@ class RealSense(Device):
             if self._info is None:  # open is still checking
                 return
             chosen = list(self._frames(frames))
+            self._count_skipped(chosen)
             if not all(self._stamped(f) for _, f in chosen):
                 self.unstamped += 1
                 return
@@ -454,6 +468,15 @@ class RealSense(Device):
                 self._frame.offer(readings)
         except Exception as error:  # noqa: BLE001 - raised to the host by the next read
             self._failure = error
+
+    def _count_skipped(self, chosen: list[tuple[str, Any]]) -> None:
+        for name, frame in chosen:
+            if name == "color":
+                number = int(frame.get_frame_number())
+                if self._last_color is not None and number > self._last_color + 1:
+                    self.skipped += number - self._last_color - 1
+                if self._last_color is None or number > self._last_color:
+                    self._last_color = number
 
     def _devices_changed(self, info: Any) -> None:
         """librealsense's callback, on its own thread: mark this camera removed."""
@@ -513,7 +536,8 @@ class RealSense(Device):
         return bool(frame.get_frame_timestamp_domain() == rs.timestamp_domain.hardware_clock)
 
     def diagnostics(self) -> dict[str, JsonValue] | None:
-        """The camera clock's mapping and its keeper, and the frames dropped, as they stand."""
+        """The camera clock's mapping and its keeper, and where frames went missing: skipped by
+        librealsense, dropped here, replaced unread."""
         rgbd = self._frame
         return {
             "time": self._time.facts() if self._time is not None else None,
@@ -522,7 +546,14 @@ class RealSense(Device):
             "outliers": self.outliers,
             "no_metadata": self.no_metadata,
             "drops": dict(rgbd.drops.counts) if rgbd is not None else None,
+            "skipped": self.skipped,
+            "replaced": dict(self._newest.replaced),
+            "queue_max": self._take_queue_max(),
         }
+
+    def _take_queue_max(self) -> int:
+        most, self.queue_max = self.queue_max, 0
+        return most
 
     def _check_timing(self, frame: Any) -> None:
         domain = frame.get_frame_timestamp_domain()

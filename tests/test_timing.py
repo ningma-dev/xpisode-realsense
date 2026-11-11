@@ -47,6 +47,8 @@ class Camera:
         time instead, and says so in their domain."""
         self.garbled: set[int] = set()
         """Frame numbers whose hardware stamp is nonsense."""
+        self.lost: set[int] = set()
+        """Frame numbers the camera counted that never reach the host (USB, librealsense)."""
 
     def clock_us(self, host_ns: int) -> float:
         return (self.start_us + (host_ns - self.origin_ns) / 1000 * (1 + 70e-6)) % COUNTER_WRAP
@@ -170,6 +172,10 @@ class FrameQueue:
                 return False, None
             return True, self.frames.popleft()
 
+    def size(self) -> int:
+        with self.ready:
+            return len(self.frames)
+
 
 class Pipeline:
     def __init__(self, camera: Camera) -> None:
@@ -197,6 +203,8 @@ class Pipeline:
             number += 1
             exposed = time.monotonic_ns() - 2_000_000
             self.camera.exposures[number] = exposed
+            if number in self.camera.lost:
+                continue
             callback(Frameset(Frame(self.camera, k, i, number, exposed) for k, i in self.streams))
 
     def stop(self) -> None:
@@ -390,3 +398,34 @@ def test_a_frame_without_its_hardware_stamp_is_dropped_and_counted(
     assert keeper["failures"] == 0
     times = [r.time_ns for r in first + after]
     assert times == sorted(times)
+
+
+def test_frames_librealsense_never_handed_over_are_counted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every frame missing from an Episode shows where it went: frame numbers librealsense
+    skipped, frame sets dropped here, frames the host read too late."""
+    camera = Camera()
+    librealsense(monkeypatch, camera)
+    device = d405()
+    device.open(MonotonicClock())
+    try:
+        first = frames_for(device, 0.3)
+        assert first[-1].sequence is not None
+        start = first[-1].sequence + 3
+        camera.lost |= {start, start + 4, start + 5}
+        after = frames_for(device, 0.6)
+        diagnostics = device.diagnostics()
+        again = device.diagnostics()
+    finally:
+        device.close()
+    numbers = {r.sequence for r in after}
+    assert not numbers & {start, start + 4, start + 5}
+    assert diagnostics is not None
+    assert diagnostics["skipped"] == 3
+    assert isinstance(diagnostics["replaced"], dict)
+    queue_max = diagnostics["queue_max"]
+    assert isinstance(queue_max, int)
+    assert queue_max >= 1
+    assert again is not None
+    assert again["queue_max"] == 0  # since the last diagnostics

@@ -11,6 +11,9 @@
 - librealsense puts framesets into a queue of its own (`pipeline.start(config, queue=...)`, by
   keyword: by position pyrealsense2 takes the queue as a Python callback) and a thread here takes
   them, so librealsense's thread never waits for the interpreter.
+- `device.diagnostics` says where frames missing from an Episode went: `skipped` (color frame
+  numbers librealsense never handed over), `drops` (frame sets dropped here), `replaced` (read
+  too late by the host), and `queue_max`, the most frame sets that waited in the queue.
 - The `frame` stream declares its rate (the configured fps), so a station can list it in
   `required_streams`.
 
