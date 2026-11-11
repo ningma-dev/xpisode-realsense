@@ -1,7 +1,7 @@
-# A station that only records one D405 (format scenario S5: sensors only). From the station
-# project, with this file in its stations/:
+# A station that only records one D405 (sensors only). From the station project, with this
+# file in its stations/:
 #
-#     uv run xpisode run stations/d405/d405_station.toml
+#     uv run xpisode run stations/d405/d405_station.toml --who YOUR_NAME
 
 station = "d405"
 required_streams = ["/wrist_camera/frame"]

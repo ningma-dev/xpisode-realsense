@@ -8,6 +8,8 @@
 - Frames are stamped with the camera's hardware clock, mapped to the host's monotonic clock by
   xpisode-device's `DeviceClock`; librealsense's global time (mapped to the wall clock) is off.
 - Infrared is recorded as lossless FFV1 gray instead of zstd.
+- The `frame` stream declares its rate (the configured fps), so a station can list it in
+  `required_streams`.
 
 ## 0.1.0
 
