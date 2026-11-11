@@ -1113,7 +1113,7 @@ wheels = [
 [[package]]
 name = "xpisode-device"
 version = "0.1.0"
-source = { git = "https://github.com/ningma-dev/xpisode.git?subdirectory=packages%2Fxpisode-device&rev=cd8513bdd395730129ad578940a8e5f5383161c4#cd8513bdd395730129ad578940a8e5f5383161c4" }
+source = { git = "https://github.com/ningma-dev/xpisode.git?subdirectory=packages%2Fxpisode-device&rev=d6a25cec1511d432b120128638d33a462c548588#d6a25cec1511d432b120128638d33a462c548588" }
 dependencies = [
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
@@ -1130,7 +1130,7 @@ iox = [
 [[package]]
 name = "xpisode-format"
 version = "0.1.0"
-source = { git = "https://github.com/ningma-dev/xpisode.git?subdirectory=packages%2Fxpisode-format&rev=cd8513bdd395730129ad578940a8e5f5383161c4#cd8513bdd395730129ad578940a8e5f5383161c4" }
+source = { git = "https://github.com/ningma-dev/xpisode.git?subdirectory=packages%2Fxpisode-format&rev=d6a25cec1511d432b120128638d33a462c548588#d6a25cec1511d432b120128638d33a462c548588" }
 dependencies = [
     { name = "av", version = "16.1.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "av", version = "19.0.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
@@ -1173,8 +1173,8 @@ requires-dist = [
     { name = "numpy", specifier = ">=1.24" },
     { name = "opencv-python-headless", specifier = ">=4.10" },
     { name = "pyrealsense2", specifier = ">=2.59" },
-    { name = "xpisode-device", extras = ["iox"], git = "https://github.com/ningma-dev/xpisode.git?subdirectory=packages%2Fxpisode-device&rev=cd8513bdd395730129ad578940a8e5f5383161c4" },
-    { name = "xpisode-format", git = "https://github.com/ningma-dev/xpisode.git?subdirectory=packages%2Fxpisode-format&rev=cd8513bdd395730129ad578940a8e5f5383161c4" },
+    { name = "xpisode-device", extras = ["iox"], git = "https://github.com/ningma-dev/xpisode.git?subdirectory=packages%2Fxpisode-device&rev=d6a25cec1511d432b120128638d33a462c548588" },
+    { name = "xpisode-format", git = "https://github.com/ningma-dev/xpisode.git?subdirectory=packages%2Fxpisode-format&rev=d6a25cec1511d432b120128638d33a462c548588" },
 ]
 
 [package.metadata.requires-dev]
