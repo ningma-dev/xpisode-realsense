@@ -8,6 +8,9 @@
 - Frames are stamped with the camera's hardware clock, mapped to the host's monotonic clock by
   xpisode-device's `DeviceClock`; librealsense's global time (mapped to the wall clock) is off.
 - Infrared is recorded as lossless FFV1 gray instead of zstd.
+- librealsense puts framesets into a queue of its own (`pipeline.start(config, queue=...)`, by
+  keyword: by position pyrealsense2 takes the queue as a Python callback) and a thread here takes
+  them, so librealsense's thread never waits for the interpreter.
 - The `frame` stream declares its rate (the configured fps), so a station can list it in
   `required_streams`.
 

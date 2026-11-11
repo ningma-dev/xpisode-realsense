@@ -177,7 +177,11 @@ class Pipeline:
         self.thread: threading.Thread | None = None
         self.streams: list[tuple[Any, int]] = []
 
-    def start(self, config: Any, queue: FrameQueue) -> Any:
+    def start(self, config: Any, callback: Any = None, *, queue: FrameQueue | None = None) -> Any:
+        """pyrealsense2's overloads: a frame_queue given by position is taken as a callback,
+        a Python callable that librealsense's thread calls holding the interpreter."""
+        if callback is not None or queue is None:
+            raise AssertionError("the frame_queue must be given as queue=")
         self.streams = config.streams
         self.thread = threading.Thread(target=self._stream, args=(queue.enqueue,), daemon=True)
         self.thread.start()

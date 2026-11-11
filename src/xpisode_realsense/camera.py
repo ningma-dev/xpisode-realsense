@@ -85,7 +85,13 @@ puts them into a queue of its own, and a thread here takes them. Calling into Py
 librealsense's thread instead waited for the interpreter while the host encoded frames; on a
 busy machine librealsense then lost 2 to 11% of the frames of three D405s (a bare
 librealsense reader lost 0.2% under the same load). When the queue is full, the oldest goes,
-and shows as missing by its frame number."""
+and shows as missing by its frame number.
+
+The queue goes to ``pipeline.start`` by keyword: given positionally, pyrealsense2 (2.59.1)
+binds it to the callback overload, a Python callable, and librealsense's thread waits for the
+interpreter to put each frameset in, as with a callback. Measured on a D405 while a Python
+thread held the interpreter for 2 s: by position, the 49 framesets of that time were lost; by
+keyword, all 60 were queued."""
 
 
 TICK_NS = 1000
@@ -339,7 +345,7 @@ class RealSense(Device):
         # the host's (polling for the newest one from the host's thread, between encoding
         # frames, lost a third of them with color and depth from three D405s).
         self._queue = rs.frame_queue(QUEUE_FRAMESETS, True)
-        profile = pipeline.start(config, self._queue)
+        profile = pipeline.start(config, queue=self._queue)
         self._stop_taking.clear()
         self._taking = threading.Thread(target=self._take, name="realsense", daemon=True)
         self._taking.start()
