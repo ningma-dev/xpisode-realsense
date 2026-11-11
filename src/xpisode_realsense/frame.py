@@ -265,7 +265,7 @@ class Frame:
                 role=Role.OBSERVATION,
                 time_meaning=TimeMeaning.ACQUISITION,
                 counter=Counter.DEVICE,
-                nominal_hz=None,
+                nominal_hz=float(fps),
                 fields=tuple(descriptions),
                 camera=color,
                 description="Synchronized frameset; each image declares its optical coordinates",

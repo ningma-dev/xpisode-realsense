@@ -301,6 +301,8 @@ def test_open_starts_the_clock_keeper_and_close_stops_it(monkeypatch: pytest.Mon
         assert infrared.encoding is Encoding.FFV1
         assert infrared.shape == (HEIGHT, WIDTH)
         assert info.streams["frame"].spec.description
+        # A station may require the frame stream, and judges a required stream by its rate.
+        assert frame.nominal_hz == FPS
         reading = frames_for(device, 0.2)[-1]
         index = [f.name for f in frame.fields].index("infrared_left")
         image = np.asarray(reading.values[index])
