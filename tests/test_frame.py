@@ -210,8 +210,32 @@ def test_a_second_without_a_frame_faults_the_camera():
         failure=None,
         last_result=time.monotonic(),
     )
+    state.last_check = state.resumed = state.last_result
     state.diagnosis = lambda: Frame.diagnosis(cast(Frame, state))
     Frame.check(cast(Frame, state))
     state.last_result -= STALL_S + 0.1
+    state.resumed -= STALL_S + 0.1
     with pytest.raises(TimeoutError, match=r"stalled.*1\.1 s since the last frame"):
+        Frame.check(cast(Frame, state))
+
+
+def test_after_this_process_paused_the_silence_counts_from_then():
+    """SIGSTOP for 7 s, then SIGCONT: the first check finds the last frame 7 s old, before
+    librealsense could deliver the next; the camera is not stalled for that."""
+    now = time.monotonic()
+    state = SimpleNamespace(
+        names=("color",),
+        last_counters={},
+        drops=Drops(),
+        failure=None,
+        last_result=now - 7.0,
+        last_check=now - 7.0,
+        resumed=now - 7.0,
+    )
+    state.diagnosis = lambda: Frame.diagnosis(cast(Frame, state))
+    Frame.check(cast(Frame, state))  # the pause: no fault
+    assert state.resumed >= now
+    state.resumed -= STALL_S + 0.1  # still nothing a second after it
+    state.last_check = time.monotonic()
+    with pytest.raises(TimeoutError, match=r"stalled.*since the last frame"):
         Frame.check(cast(Frame, state))

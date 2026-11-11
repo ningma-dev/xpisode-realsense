@@ -133,6 +133,11 @@ frame without a number; another stream's frame already seen; the two infrared fr
 different exposures."""
 STALL_S = 1.0
 """No frame for this long faults the camera; at 30 Hz the longest normal gap is about 0.37 s."""
+PAUSE_S = 0.5
+"""Checks this far apart (the host checks at four times the frame rate): this process was not
+running, stopped (SIGSTOP) or starved, and librealsense's thread in it neither. The silence
+then counts from that check: the first check after a pause found the last frame from before
+it and faulted the camera before librealsense could deliver the next."""
 
 
 @dataclass
@@ -181,6 +186,8 @@ class Frame:
         self.failure: Exception | None = None
         self.ready = threading.Event()
         self.last_result = time.monotonic()
+        self.last_check = self.resumed = self.last_result
+        """When ``check`` last ran, and when it last found that this process had paused."""
         self.last_sequence = -1
         self.last_counters: dict[str, int] = {}
         self.discarded = 0
@@ -401,7 +408,11 @@ class Frame:
     def check(self) -> None:
         if self.failure is not None:
             raise self.failure
-        if time.monotonic() - self.last_result > STALL_S:
+        now = time.monotonic()
+        if now - self.last_check > PAUSE_S:
+            self.resumed = now
+        self.last_check = now
+        if now - max(self.last_result, self.resumed) > STALL_S:
             raise TimeoutError(f"frame observation stalled; no source fallback; {self.diagnosis()}")
 
     def diagnosis(self) -> str:
