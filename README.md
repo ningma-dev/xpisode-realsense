@@ -20,10 +20,10 @@ Follow [Install a station](docs/installation.md) to build the core and adapter a
 uv run python -c 'import pyrealsense2 as rs; print("\n".join(d.get_info(rs.camera_info.serial_number) for d in rs.context().query_devices()))'
 ```
 
-Replace `YOUR_CAMERA_SERIAL` in `stations/d405/d405_station.toml` with the chosen serial, then start the station:
+Replace `YOUR_CAMERA_SERIAL` in `stations/d405/d405_station.toml` with the chosen serial, then start the station with your name (`--who`, or the environment variable `XPISODE_WHO`; a shared account name such as `ubuntu` or `root` is refused):
 
 ```bash
-uv run xpisode run stations/d405/d405_station.toml
+uv run xpisode run stations/d405/d405_station.toml --who YOUR_NAME
 ```
 
 In another terminal in the same project, start the panel:
@@ -32,7 +32,7 @@ In another terminal in the same project, start the panel:
 uv run xpisode serve
 ```
 
-Start and stop a recording on its Collection page; Ctrl+C in the station's terminal shuts the station down. To review recordings, open **Episodes**: each Episode's page shows its check (fields, timing, missing frames). Select the image or depth fields to display. The viewer uses recorded field metadata; the user chooses which depth produces a point cloud.
+Open `http://127.0.0.1:8043` and start and stop a recording on **Collection → Record**; Ctrl+C in the station's terminal shuts the station down. To review recordings, open **Episodes**: each Episode's page shows its check (fields, timing, missing frames). Select the image or depth fields to display. The viewer uses recorded field metadata; the user chooses which depth produces a point cloud.
 
 ## Select fields
 

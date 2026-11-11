@@ -50,8 +50,8 @@ uv run xpisode --help
 The template installs all xpisode packages from `wheels/`. The RealSense SDK and OpenCV are installed from PyPI; no inference model is needed for hardware depth.
 The generated `uv.lock` records the installation. Keep it with the project when deploying another station. Build wheels on a system compatible with the destination; a locally built Linux wheel is not a manylinux release wheel.
 
-Replace `YOUR_CAMERA_SERIAL` in `stations/d405/d405_station.toml` with your camera serial, then run `uv run xpisode run stations/d405/d405_station.toml`. The [recording walkthrough](../README.md#install-and-record) covers capture and shutdown.
+Replace `YOUR_CAMERA_SERIAL` in `stations/d405/d405_station.toml` with your camera serial, then run `uv run xpisode run stations/d405/d405_station.toml --who YOUR_NAME`. The [recording walkthrough](../README.md#install-and-record) covers capture and shutdown.
 
-Recordings go into `my-station/data/<station>/episodes/`. To inspect them, run `uv run xpisode serve` in this project and open the URL printed by the command. Stop the server with Ctrl+C when finished.
+Recordings go into `my-station/data/store/episodes/`, one `.mcap` file per Episode under two levels of bucket folders. To inspect them, run `uv run xpisode serve` in this project and open the URL printed by the command. Stop the server with Ctrl+C when finished.
 
-For annotation, review and dataset export, core repository collaborators can follow the [xpisode collection tutorial](https://github.com/ningma-dev/xpisode/blob/main/docs/tutorials/collection.md).
+For plans, judging and datasets, core repository collaborators can follow the [xpisode collection tutorial](https://github.com/ningma-dev/xpisode/blob/main/docs/tutorials/collection.md).
