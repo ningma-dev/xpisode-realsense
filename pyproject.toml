@@ -50,8 +50,8 @@ filterwarnings = ["error"]
 include = ["src", "tests", "examples", "docs", "scripts", ".github", "README.md", "CHANGELOG.md", "CONTRIBUTING.md", "LICENSE", "pyproject.toml", "uv.lock"]
 
 [tool.uv.sources]
-xpisode-device = { git = "https://github.com/ningma-dev/xpisode.git", rev = "a96b19a1afbfb0b5722dd3f12740ab3b25bdb775", subdirectory = "packages/xpisode-device" }
-xpisode-format = { git = "https://github.com/ningma-dev/xpisode.git", rev = "a96b19a1afbfb0b5722dd3f12740ab3b25bdb775", subdirectory = "packages/xpisode-format" }
+xpisode-device = { git = "https://github.com/ningma-dev/xpisode.git", rev = "cd8513bdd395730129ad578940a8e5f5383161c4", subdirectory = "packages/xpisode-device" }
+xpisode-format = { git = "https://github.com/ningma-dev/xpisode.git", rev = "cd8513bdd395730129ad578940a8e5f5383161c4", subdirectory = "packages/xpisode-format" }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/xpisode_realsense"]

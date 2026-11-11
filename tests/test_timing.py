@@ -41,6 +41,11 @@ class Camera:
         self.exposures: dict[int, int] = {}
         """Frame number: when it was exposed, on the host's monotonic clock."""
         self.stopped = False
+        self.unstamped: set[int] = set()
+        """Frame numbers whose metadata is missing: librealsense stamps them with the host's
+        time instead, and says so in their domain."""
+        self.garbled: set[int] = set()
+        """Frame numbers whose hardware stamp is nonsense."""
 
     def clock_us(self, host_ns: int) -> float:
         return (self.start_us + (host_ns - self.origin_ns) / 1000 * (1 + 70e-6)) % COUNTER_WRAP
@@ -94,13 +99,21 @@ class Frame:
             stream_name=lambda: str(self.kind),
         )
 
+    def supports_frame_metadata(self, value: Any) -> bool:
+        assert value == rs.frame_metadata_value.frame_timestamp
+        return self.number not in self.camera.unstamped
+
     def get_frame_timestamp_domain(self) -> Any:
         domain = rs.timestamp_domain
+        if self.number in self.camera.unstamped:
+            return domain.system_time
         return domain.global_time if self.global_time else domain.hardware_clock
 
     def get_timestamp(self) -> float:
-        if self.global_time:  # librealsense's global time: on the wall clock
+        if self.global_time or self.number in self.camera.unstamped:  # on the wall clock
             return time.time() * 1000 - 2
+        if self.number in self.camera.garbled:  # half the counter away: 36 minutes off
+            return (self.camera.clock_us(self.exposed) + COUNTER_WRAP / 2) % COUNTER_WRAP / 1000
         return self.camera.clock_us(self.exposed) / 1000
 
     def get_frame_number(self) -> int:
@@ -192,6 +205,7 @@ def librealsense(monkeypatch: pytest.MonkeyPatch, camera: Camera) -> Pipeline:
         camera_info=rs.camera_info,
         option=rs.option,
         timestamp_domain=rs.timestamp_domain,
+        frame_metadata_value=rs.frame_metadata_value,
         __version__=rs.__version__,
     )
     monkeypatch.setattr(camera_module, "rs", fake)
@@ -311,3 +325,41 @@ def test_a_camera_whose_global_time_stays_on_fails_to_open(
     assert not pipeline.thread.is_alive()
     time.sleep(0.05)
     assert not any(t.name == "device-clock" and t.is_alive() for t in threading.enumerate())
+
+
+def test_a_frame_without_its_hardware_stamp_is_dropped_and_counted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A frame that lost its metadata carries the host's wall time; one with a stamp far off
+    the mapping, once, is not a reset. Both are dropped; the camera goes on."""
+    camera = Camera()
+    librealsense(monkeypatch, camera)
+    device = d405()
+    device.open(MonotonicClock())
+    try:
+        first = frames_for(device, 0.3)
+        assert first
+        assert first[-1].sequence is not None
+        start = first[-1].sequence + 3
+        camera.unstamped |= {start, start + 1, start + 2}
+        camera.garbled |= {start + 6}
+        after = frames_for(device, 0.6)
+        diagnostics = device.diagnostics()
+    finally:
+        device.close()
+    numbers = {r.sequence for r in after}
+    assert not numbers & {start, start + 1, start + 2, start + 6}
+    assert max(n for n in numbers if n is not None) > start + 6  # it went on
+    assert device.unstamped == 3
+    assert device.outliers == 1
+    assert diagnostics is not None
+    assert (diagnostics["unstamped"], diagnostics["outliers"]) == (3, 1)
+    assert diagnostics["no_metadata"] == 3
+    time_facts = diagnostics["time"]
+    assert isinstance(time_facts, dict)
+    assert (time_facts["outliers"], time_facts["resets"], time_facts["broken"]) == (1, 0, None)
+    keeper = diagnostics["keeper"]
+    assert isinstance(keeper, dict)
+    assert keeper["failures"] == 0
+    times = [r.time_ns for r in first + after]
+    assert times == sorted(times)

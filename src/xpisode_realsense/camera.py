@@ -30,6 +30,7 @@ import numpy as np
 from xpisode_device import (
     Clock,
     ClockKeeper,
+    ClockOutlier,
     Device,
     DeviceClock,
     DeviceInfo,
@@ -305,6 +306,14 @@ class RealSense(Device):
         self._keeper: ClockKeeper | None = None
         self._timing = threading.Event()
         """Set once global time is off: frames before it may still be in global time."""
+        self.unstamped = 0
+        """Framesets dropped: a frame of it was not stamped with the camera's hardware clock
+        (librealsense falls back to the host's time when a frame lacks its metadata)."""
+        self.outliers = 0
+        """Framesets dropped: a stamp far off the mapping, once (``ClockOutlier``)."""
+        self.no_metadata = 0
+        """Frames without ``frame_timestamp`` metadata, kept when their domain is the
+        hardware clock: counted, to see on the rig whether that ever happens."""
 
     def open(self, clock: Clock) -> None:
         config = rs.config()
@@ -392,7 +401,15 @@ class RealSense(Device):
                 return
             if self._info is None:  # open is still checking
                 return
-            readings = {name: self._reading(f, arrival) for name, f in self._frames(frames)}
+            chosen = list(self._frames(frames))
+            if not all(self._stamped(f) for _, f in chosen):
+                self.unstamped += 1
+                return
+            try:
+                readings = {name: self._reading(f, arrival) for name, f in chosen}
+            except ClockOutlier:
+                self.outliers += 1  # the next frameset agreeing would be a reset
+                return
             if self.legacy_topics:
                 for name, reading in readings.items():
                     assert reading.sequence is not None
@@ -451,6 +468,25 @@ class RealSense(Device):
             name = self._names.get((profile.stream_type(), profile.stream_index()))
             if name is not None:
                 yield name, frame
+
+    def _stamped(self, frame: Any) -> bool:
+        """Whether the frame's time is the camera's hardware clock, which the mapping knows;
+        anything else would map to nonsense and break it."""
+        if not frame.supports_frame_metadata(rs.frame_metadata_value.frame_timestamp):
+            self.no_metadata += 1
+        return bool(frame.get_frame_timestamp_domain() == rs.timestamp_domain.hardware_clock)
+
+    def diagnostics(self) -> dict[str, JsonValue] | None:
+        """The camera clock's mapping and its keeper, and the frames dropped, as they stand."""
+        rgbd = self._frame
+        return {
+            "time": self._time.facts() if self._time is not None else None,
+            "keeper": self._keeper.facts() if self._keeper is not None else None,
+            "unstamped": self.unstamped,
+            "outliers": self.outliers,
+            "no_metadata": self.no_metadata,
+            "drops": dict(rgbd.drops.counts) if rgbd is not None else None,
+        }
 
     def _check_timing(self, frame: Any) -> None:
         domain = frame.get_frame_timestamp_domain()
