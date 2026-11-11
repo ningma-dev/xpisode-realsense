@@ -79,6 +79,13 @@ POLLS_PER_FRAME = 4
 WARMUP_FRAMES = 5
 """Frames ``open`` waits for: the camera is streaming and its metadata is there."""
 FIRST_FRAME_TIMEOUT_MS = 5000
+QUEUE_FRAMESETS = 8
+"""Framesets librealsense may hold for this process, about a quarter second at 30 fps: it
+puts them into a queue of its own, and a thread here takes them. Calling into Python from
+librealsense's thread instead waited for the interpreter while the host encoded frames; on a
+busy machine librealsense then lost 2 to 11% of the frames of three D405s (a bare
+librealsense reader lost 0.2% under the same load). When the queue is full, the oldest goes,
+and shows as missing by its frame number."""
 
 
 TICK_NS = 1000
@@ -292,6 +299,9 @@ class RealSense(Device):
         self._names = {(self.offers[n].stream, self.offers[n].index): n for n in self.streams}
         self._clock: Clock | None = None
         self._pipeline: Any = None
+        self._queue: Any = None
+        self._taking: threading.Thread | None = None
+        self._stop_taking = threading.Event()
         self._info: DeviceInfo | None = None
         self._newest = Newest()
         self._context: Any = None
@@ -325,10 +335,14 @@ class RealSense(Device):
             )
         self._clock = clock
         pipeline = rs.pipeline()
-        # librealsense hands over every frameset on its own thread. Polling for the newest
-        # one from the host's thread, between encoding frames, lost a third of them with
-        # color and depth from three D405s.
-        profile = pipeline.start(config, self._on_frames)
+        # librealsense queues every frameset; a thread of this module takes them, apart from
+        # the host's (polling for the newest one from the host's thread, between encoding
+        # frames, lost a third of them with color and depth from three D405s).
+        self._queue = rs.frame_queue(QUEUE_FRAMESETS, True)
+        profile = pipeline.start(config, self._queue)
+        self._stop_taking.clear()
+        self._taking = threading.Thread(target=self._take, name="realsense", daemon=True)
+        self._taking.start()
         try:
             self._keep_time(profile.get_device(), clock)
             self._check_model(profile.get_device())
@@ -365,6 +379,7 @@ class RealSense(Device):
             if self._keeper is not None:
                 self._keeper.stop()
             pipeline.stop()
+            self._end_taking()
             raise
         self._pipeline = pipeline
         # librealsense says when a camera goes; polling for frames alone only goes quiet.
@@ -386,8 +401,23 @@ class RealSense(Device):
         self._keeper.start()
         self._timing.set()
 
+    def _take(self) -> None:
+        """Take each frameset from librealsense's queue, on this module's thread, until
+        closed; waiting lets go of the interpreter."""
+        queue = self._queue
+        while not self._stop_taking.is_set():
+            ok, frame = queue.try_wait_for_frame(100)
+            if ok:
+                self._on_frames(frame)
+
+    def _end_taking(self) -> None:
+        self._stop_taking.set()
+        if self._taking is not None:
+            self._taking.join(timeout=2)
+            self._taking = None
+
     def _on_frames(self, frame: Any) -> None:
-        """librealsense's callback, on its own thread: each frameset as it arrives."""
+        """Each frameset as librealsense delivered it, on the taking thread."""
         try:
             if self._clock is None or not self._timing.is_set():
                 return
@@ -600,3 +630,4 @@ class RealSense(Device):
             if self._pipeline is not None:
                 self._pipeline.stop()
                 self._pipeline = None
+            self._end_taking()

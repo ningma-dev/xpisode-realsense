@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import collections
 import threading
 import time
 from collections.abc import Callable
@@ -151,15 +152,34 @@ class StreamProfile:
         )
 
 
+class FrameQueue:
+    """librealsense's frame_queue: the oldest goes when it is full."""
+
+    def __init__(self, capacity: int, keep_frames: bool = False) -> None:
+        self.frames: collections.deque[Any] = collections.deque(maxlen=capacity)
+        self.ready = threading.Condition()
+
+    def enqueue(self, frame: Any) -> None:
+        with self.ready:
+            self.frames.append(frame)
+            self.ready.notify()
+
+    def try_wait_for_frame(self, timeout_ms: int = 5000) -> tuple[bool, Any]:
+        with self.ready:
+            if not self.ready.wait_for(lambda: bool(self.frames), timeout_ms / 1000):
+                return False, None
+            return True, self.frames.popleft()
+
+
 class Pipeline:
     def __init__(self, camera: Camera) -> None:
         self.camera = camera
         self.thread: threading.Thread | None = None
         self.streams: list[tuple[Any, int]] = []
 
-    def start(self, config: Any, callback: Callable[[Any], None]) -> Any:
+    def start(self, config: Any, queue: FrameQueue) -> Any:
         self.streams = config.streams
-        self.thread = threading.Thread(target=self._stream, args=(callback,), daemon=True)
+        self.thread = threading.Thread(target=self._stream, args=(queue.enqueue,), daemon=True)
         self.thread.start()
         return SimpleNamespace(get_device=lambda: self.camera, get_stream=self.get_stream)
 
@@ -201,6 +221,7 @@ def librealsense(monkeypatch: pytest.MonkeyPatch, camera: Camera) -> Pipeline:
     fake = SimpleNamespace(
         config=Config,
         pipeline=lambda: pipeline,
+        frame_queue=FrameQueue,
         context=lambda: SimpleNamespace(set_devices_changed_callback=ignore),
         camera_info=rs.camera_info,
         option=rs.option,
