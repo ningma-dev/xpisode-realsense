@@ -85,6 +85,8 @@ class D405(RealSense):
         exposure_us: float | None = None,
         gain: float | None = None,
         image_encoding: str = "ffv1",
+        av1_quality: int = 28,
+        av1_keyframe_interval: int = 10,
     ) -> None:
         super().__init__(
             serial=serial,
@@ -98,6 +100,8 @@ class D405(RealSense):
             exposure_us=exposure_us,
             gain=gain,
             image_encoding=image_encoding,
+            av1_quality=av1_quality,
+            av1_keyframe_interval=av1_keyframe_interval,
         )
 
     def identity(self, device: Any) -> dict[str, JsonValue]:

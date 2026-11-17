@@ -62,16 +62,18 @@ def test_inferred_depth_requires_backend():
         D405(serial="0", frame_fields=["color", "depth_ffs"])
 
 
-def test_images_leave_raw_for_a_station_that_stores_them_itself() -> None:
+def test_images_leave_as_av1_for_the_host_to_encode() -> None:
     from xpisode_format.spec import Encoding
 
     ffv1 = D405(serial="0", width=640, height=480)
-    raw = D405(serial="0", width=640, height=480, image_encoding="raw")
+    av1 = D405(serial="0", width=640, height=480, image_encoding="av1", av1_quality=30)
     for name in ("color", "infrared_1", "infrared_2"):
         assert ffv1._field(name, 1.0).encoding is Encoding.FFV1
-        field = raw._field(name, 1.0)
-        assert field.encoding is Encoding.RAW
+        field = av1._field(name, 1.0)
+        assert field.encoding is Encoding.AV1
         assert field.codec_config is None
-    assert raw._field("depth", 1e-4).encoding is Encoding.ZSTD
+    assert av1._field("depth", 1e-4).encoding is Encoding.ZSTD
+    assert ffv1.image_encoding() == {}
+    assert av1.image_encoding() == {"encoder": "nvenc", "quality": 30, "keyframe_interval": 10}
     with pytest.raises(ValueError, match="image_encoding"):
-        D405(serial="0", image_encoding="av1")
+        D405(serial="0", image_encoding="raw")
