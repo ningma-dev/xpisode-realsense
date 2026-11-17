@@ -84,6 +84,7 @@ class D405(RealSense):
         legacy_topics: bool = False,
         exposure_us: float | None = None,
         gain: float | None = None,
+        image_encoding: str = "ffv1",
     ) -> None:
         super().__init__(
             serial=serial,
@@ -96,6 +97,7 @@ class D405(RealSense):
             legacy_topics=legacy_topics,
             exposure_us=exposure_us,
             gain=gain,
+            image_encoding=image_encoding,
         )
 
     def identity(self, device: Any) -> dict[str, JsonValue]:

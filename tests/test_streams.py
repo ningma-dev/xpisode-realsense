@@ -60,3 +60,18 @@ def test_invalid_frame_fields_fail_before_open(fields: list[str]) -> None:
 def test_inferred_depth_requires_backend():
     with pytest.raises(ValueError, match="requires"):
         D405(serial="0", frame_fields=["color", "depth_ffs"])
+
+
+def test_images_leave_raw_for_a_station_that_stores_them_itself() -> None:
+    from xpisode_format.spec import Encoding
+
+    ffv1 = D405(serial="0", width=640, height=480)
+    raw = D405(serial="0", width=640, height=480, image_encoding="raw")
+    for name in ("color", "infrared_1", "infrared_2"):
+        assert ffv1._field(name, 1.0).encoding is Encoding.FFV1
+        field = raw._field(name, 1.0)
+        assert field.encoding is Encoding.RAW
+        assert field.codec_config is None
+    assert raw._field("depth", 1e-4).encoding is Encoding.ZSTD
+    with pytest.raises(ValueError, match="image_encoding"):
+        D405(serial="0", image_encoding="av1")

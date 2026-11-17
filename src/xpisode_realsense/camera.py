@@ -74,6 +74,11 @@ class Kind:
     description: str
 
 
+IMAGE_ENCODINGS = ("ffv1", "raw")
+"""How color and infrared leave this process: ``ffv1``, encoded here, losslessly; or
+``raw``, as captured, for the station to store as it declares (its ``images``: AV1, encoded
+on the recording side, design section 7.4), so that nothing is encoded where frames are
+taken."""
 POLLS_PER_FRAME = 4
 """How often the host asks for a new frame, per frame interval."""
 WARMUP_FRAMES = 5
@@ -261,7 +266,11 @@ class RealSense(Device):
         legacy_topics: bool = False,
         exposure_us: float | None = None,
         gain: float | None = None,
+        image_encoding: str = "ffv1",
     ) -> None:
+        if image_encoding not in IMAGE_ENCODINGS:
+            raise ValueError(f"image_encoding {image_encoding!r}: one of {list(IMAGE_ENCODINGS)}")
+        self.image_encoding = image_encoding
         if exposure_us is not None and not exposure_us > 0:
             raise ValueError("exposure_us must be positive")
         if gain is not None and exposure_us is None:
@@ -615,16 +624,19 @@ class RealSense(Device):
             axes = (*pixels, Axis(name="channel", labels=kind.channels))
         else:
             shape, axes = (self.height, self.width), pixels
+        encoding = kind.encoding
+        if encoding is Encoding.FFV1 and self.image_encoding == "raw":
+            encoding = Encoding.RAW
         return Field(
             name=name,
             dtype=kind.dtype,
             shape=shape,
             unit=kind.unit,
             scale=depth_scale if name == "depth" else 1.0,
-            encoding=kind.encoding,
+            encoding=encoding,
             codec_config=(
                 codecs.ffv1_config(self.height, self.width, len(kind.channels) or 1)
-                if kind.encoding is Encoding.FFV1
+                if encoding is Encoding.FFV1
                 else None
             ),
             axes=axes,
