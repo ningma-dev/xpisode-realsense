@@ -68,8 +68,7 @@ Each optional field can be enabled independently. Without `frame_fields`, the de
 | `streams` | `["color", "depth"]` | Independent outputs when compatibility topics are enabled |
 | `exposure_us` | auto | Fixed exposure in microseconds; turns auto exposure off |
 | `gain` | auto | Fixed gain, with `exposure_us` |
-| `image_encoding` | `ffv1` | How color and infrared leave the camera: `ffv1`, lossless, encoded here; or `av1`, encoded by the device host in a process of its own on the GPU (an NVIDIA RTX 40 or later), apart from taking frames. Depth is zstd either way |
-| `av1_quality`, `av1_keyframe_interval` | 28, 10 | With `av1`: the encoder's constant-quality target, and a keyframe at least this often (frames) |
+| `image_encoding` | `ffv1` | How color and infrared leave the camera process: `ffv1`, encoded here, lossless; or `raw`, as captured, for a station that stores images itself (its `[images]`: AV1 encoded on the recording side). Depth is zstd either way |
 
 The station example uses 640×480 at 30 Hz. Choose a resolution/rate combination supported by the camera and USB link. With several cameras, add a device entry for each serial. Opening a camera in another process at the same time can fail with a USB or `VIDIOC_S_FMT` error; stop the previous owner before retrying.
 

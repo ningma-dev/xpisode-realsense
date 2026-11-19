@@ -74,10 +74,11 @@ class Kind:
     description: str
 
 
-IMAGE_ENCODINGS = ("ffv1", "av1")
-"""How color and infrared leave this camera: ``ffv1``, lossless, encoded here; or ``av1``,
-the station's one image form (design section 7.4), encoded by the device host in a process of
-its own on the GPU, apart from taking frames."""
+IMAGE_ENCODINGS = ("ffv1", "raw")
+"""How color and infrared leave this process: ``ffv1``, encoded here, losslessly; or
+``raw``, as captured, for the station to store as it declares (its ``images``: AV1, encoded
+on the recording side, design section 7.4), so that nothing is encoded where frames are
+taken."""
 POLLS_PER_FRAME = 4
 """How often the host asks for a new frame, per frame interval."""
 WARMUP_FRAMES = 5
@@ -266,13 +267,10 @@ class RealSense(Device):
         exposure_us: float | None = None,
         gain: float | None = None,
         image_encoding: str = "ffv1",
-        av1_quality: int = 28,
-        av1_keyframe_interval: int = 10,
     ) -> None:
         if image_encoding not in IMAGE_ENCODINGS:
             raise ValueError(f"image_encoding {image_encoding!r}: one of {list(IMAGE_ENCODINGS)}")
-        self.images_as = image_encoding
-        self.av1_quality, self.av1_keyframe_interval = av1_quality, av1_keyframe_interval
+        self.image_encoding = image_encoding
         if exposure_us is not None and not exposure_us > 0:
             raise ValueError("exposure_us must be positive")
         if gain is not None and exposure_us is None:
@@ -627,8 +625,8 @@ class RealSense(Device):
         else:
             shape, axes = (self.height, self.width), pixels
         encoding = kind.encoding
-        if encoding is Encoding.FFV1 and self.images_as == "av1":
-            encoding = Encoding.AV1  # the host encodes it, apart from taking frames
+        if encoding is Encoding.FFV1 and self.image_encoding == "raw":
+            encoding = Encoding.RAW
         return Field(
             name=name,
             dtype=kind.dtype,
@@ -648,15 +646,6 @@ class RealSense(Device):
     def describe(self) -> DeviceInfo:
         assert self._info is not None, "describe after open"
         return self._info
-
-    def image_encoding(self) -> dict[str, JsonValue]:
-        if self.images_as != "av1":
-            return {}
-        return {
-            "encoder": "nvenc",
-            "quality": self.av1_quality,
-            "keyframe_interval": self.av1_keyframe_interval,
-        }
 
     def read(self, stream: str) -> Reading | None:
         if self._pipeline is None:  # the host may ask while open is still running
